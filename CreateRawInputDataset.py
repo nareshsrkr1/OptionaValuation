@@ -40,7 +40,7 @@ if __name__ == '__main__':
     pool = multiprocessing.Pool(processes=num_processes)
 
     # Initialize logging
-    log_file = 'execution.log'
+    log_file = 'logs/createRawFile.log'
     logging.basicConfig(filename=log_file, level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S')
 
