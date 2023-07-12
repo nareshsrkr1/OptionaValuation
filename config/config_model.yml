@@ -1,0 +1,22 @@
+input:
+  dataset_filename: InputDataSetLatest.csv
+
+model:
+  nodes: 120
+  optimizer: rmsprop
+  loss: mse
+  learning_rate: 0.001
+  dropout_rate: 0.25
+  activation: elu
+  num_epochs: 100
+  batch_size: 64
+  validation_split: 0.1
+
+logging:
+  level: INFO
+  filename: model_training.log
+  format: "%(asctime)s - %(levelname)s - %(message)s"
+
+files:
+  model_filename: OptionValuationModel
+  scaler_filename: scalars_model.save
