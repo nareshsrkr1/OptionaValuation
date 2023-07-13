@@ -1,80 +1,82 @@
-import torch
-from torch.autograd import Variable
-import math
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, Activation, LeakyReLU
+from keras.optimizers import Adam
+from keras.losses import Huber
+import joblib
 import logging
 
-
-def black_scholes_call(S, K, r, T, sigma):
-    d1 = (torch.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * torch.sqrt(T))
-    d2 = d1 - sigma * torch.sqrt(T)
-
-    Nd1 = 0.5 * (1 + torch.erf(d1 / math.sqrt(2)))
-    Nd2 = 0.5 * (1 + torch.erf(d2 / math.sqrt(2)))
-
-    call_price = S * Nd1 - K * torch.exp(-r * T) * Nd2
-
-    return call_price
+logging.basicConfig(level=logging.INFO, filename='logs/model_building.log', filemode='w',
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-def monte_carlo_call(S, K, r, T, sigma, n_simulations):
-    # Generate random numbers
-    rand_numbers = torch.randn(n_simulations)
+def load_dataset(filename):
+    df = pd.read_csv(filename)
+    df['Maturity'] = df['Maturity'] / 365
+    df['Spot Price'] = df['Spot Price'] / df['Strike Price']
+    df['Call_Premium'] = df['Call_Premium'] / df['Strike Price']
+    X = df.drop('Call_Premium', axis=1)
+    Y = df['Call_Premium']
+    return X, Y
 
-    # Calculate simulated stock prices
-    simulated_prices = S * torch.exp((r - 0.5 * sigma ** 2) * T + sigma * torch.sqrt(T) * rand_numbers)
 
-    # Calculate simulated call option payoffs
-    call_payoffs = torch.max(simulated_prices - K, torch.tensor(0.0))
+def scale_data(X_train, X_test):
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    return X_train_scaled, X_test_scaled, scaler
 
-    # Calculate option value using Monte Carlo estimation
-    call_option_value = torch.exp(-r * T) * torch.mean(call_payoffs)
 
-    return call_option_value
+def build_model(input_dim):
+    model = Sequential()
+    model.add(Dense(256, input_dim=input_dim))
+    model.add(Activation('elu'))
+    model.add(Dropout(0.3))
+    model.add(Dense(128))
+    model.add(Activation('relu'))
+    model.add(Dropout(0.3))
+    model.add(Dense(64))
+    model.add(Activation('elu'))
+    model.add(Dropout(0.3))
+    model.add(Dense(1))
+
+    optimizer = Adam(learning_rate=0.001)
+    model.compile(loss='mse', optimizer=optimizer)
+    return model
 
 
 if __name__ == '__main__':
-    # Initialize logging
-    log_file = 'logs/execution.log'
-    logging.basicConfig(filename=log_file, level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s',
-                        datefmt='%Y-%m-%d %H:%M:%S')
-
+    logging.info("Loading dataset...")
     try:
-        # print(model_custom_predict(2500, 2450.5, 2, 0.01,0.6))
-        # # # 450,494.95000000002045,330,70,126.07
-        # 550, 701.25, 90, 0.01, 0.8, 41.5699
-        # 550, 701.25, 120, 0.01, 0.4, 10.8082
+        X, Y = load_dataset('InputDataSetLatest.csv')
+        X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
+        X_train_scaled, X_test_scaled, scaler = scale_data(X_train, X_test)
+        model = build_model(X_train_scaled.shape[1])
 
-        S = Variable(torch.tensor(50.0), requires_grad=True)  # Underlying asset price
-        K = Variable(torch.tensor(45.0), requires_grad=True)  # Strike price
-        r = Variable(torch.tensor(0.01), requires_grad=True)  # Risk-free interest rate
-        T = Variable(torch.tensor(90/365), requires_grad=True)  # Time to maturity in years
-        sigma = Variable(torch.tensor(0.4), requires_grad=True)  # Volatility
-        n_simulations = 100000  # Number of Monte Carlo simulations
+        logging.info("Training model...")
+        num_epochs = 100
+        batch_size = 64
+        history = model.fit(X_train_scaled, Y_train, batch_size=batch_size, epochs=num_epochs,
+                            validation_split=0.1, verbose=2)
 
-        # Calculate the Black-Scholes call option price and derivatives
-        call_price = black_scholes_call(S, K, r, T, sigma)
-        call_price.backward()
+        # Evaluate model on test data
+        test_loss = model.evaluate(X_test_scaled, Y_test)
+        test_accuracy = 100 - test_loss * 100
+        print("Test Accuracy: {:.2f}%".format(test_accuracy))
 
-        # Access the gradients
-        dS = S.grad
-        dK = K.grad
-        dr = r.grad
-        dT = T.grad
-        dsigma = sigma.grad
+        # Evaluate model on train data
+        train_loss = model.evaluate(X_train_scaled, Y_train)
+        train_accuracy = 100 - train_loss * 100
+        print("Train Accuracy: {:.2f}%".format(train_accuracy))
 
-        # Print the Black-Scholes call option price and derivatives
-        logging.info("Black-Scholes Call Price: %s", call_price.item())
-        logging.info("dS: %s", dS.item())
-        logging.info("dK: %s", dK.item())
-        logging.info("dr: %s", dr.item())
-        logging.info("dT: %s", dT.item())
-        logging.info("dsigma: %s", dsigma.item())
+        logging.info("Saving model...")
+        model.save('OptionValuationModel_opt', save_format='tf')
+        logging.info("Model saved successfully.")
 
-        # Estimate the call option value using Monte Carlo simulation
-        call_option_value = monte_carlo_call(S, K, r, T, sigma, n_simulations)
-
-        # Print the Monte Carlo call option value
-        logging.info("Monte Carlo Call Option Value: %s", call_option_value.item())
-
+        logging.info("Saving scaler...")
+        joblib.dump(scaler, 'scalars_model_opt.save')
+        logging.info("Scaler saved successfully.")
     except Exception as e:
-        logging.error("An exception occurred: %s", str(e), exc_info=True)
+        logging.error(f"An error occurred during model training: {str(e)}")
