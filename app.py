@@ -5,7 +5,7 @@ import logging
 import yaml
 import torch
 from ComputeBS_MC import monte_carlo_call
-
+import time
 import streamlit as st
 
 # Load configuration from YAML file
@@ -27,13 +27,24 @@ except Exception as e:
 
 # Define the Streamlit app
 def main():
-    st.title("Option Pricing App")
+    # st.set_theme("dark")
 
+
+    # Create tabs
+    tabs = ["Option Pricing", "Comparision"]
+    active_tab = st.sidebar.radio("Select Mode", tabs)
+
+    if active_tab == "Option Pricing":
+        optionPricing()
+    elif active_tab == "Comparision":
+        multiple_predictions()
+
+def optionPricing():
+    st.title("Option Pricing App")
     if 'option_value' not in st.session_state:
         st.session_state.option_value = None
     if 'show_table' not in st.session_state:
-        st.session_state.show_table=False
-
+        st.session_state.show_table = False
 
     # Input fields
     spot_price = st.number_input("Spot Price", value=50.0, key="spot_price")
@@ -57,7 +68,6 @@ def main():
                         """
     st.markdown(hide_table_row_index, unsafe_allow_html=True)
 
-
     # Predict option value using the model
     if st.button("Predict with Model"):
         try:
@@ -68,7 +78,6 @@ def main():
             st.session_state.option_value = model_option_val
             st.success("The predicted option value with the model is: {:.2f}".format(model_option_val))
             st.session_state.show_table = True
-
 
         except Exception as e:
             st.error("An error occurred during model prediction: " + str(e))
@@ -84,8 +93,6 @@ def main():
 
         st.table(input_values.style.format('{:.2f}'))
 
-
-
     # Compare with Monte Carlo simulation
     if st.session_state.option_value is not None:
         if st.button("Compare with Monte Carlo Simulation"):
@@ -98,25 +105,50 @@ def main():
                 diff_percentage = abs(st.session_state.option_value - mc_option_val) / st.session_state.option_value * 100
 
                 comparison_table = pd.DataFrame({'Model Prediction': [st.session_state.option_value],
-                                                 'Monte Carlo Simulation': [mc_option_val],})
+                                                 'Monte Carlo Simulation': [mc_option_val]})
                                                  # 'Difference (%)': [diff_percentage]})
                 st.table(comparison_table.reset_index(drop=True).style.format('{:.2f}'))
 
             except Exception as e:
                 st.error("An error occurred during Monte Carlo simulation: " + str(e))
 
-# Prediction function
+
+def multiple_predictions():
+    # Read data from CSV file
+    records_df = pd.read_csv('random1k.csv')
+    st.title("Option Pricing App - Comparison")
+
+    # Add a "Predict" button at the top
+    if st.button("Predict Option Values", key="predict_button", help="Click to predict option values"):
+        with st.spinner("Predicting option values..."):
+            start_time = time.time()
+
+            # Predict option values for all records using apply() with a lambda function
+            records_df['Option Value'] = records_df.apply(lambda row: model_custom_predict(row['Spot Price'], row['Strike Price'], row['Maturity'] / 365, row['risk_free_interest'], row['Volatility']), axis=1)
+
+            # Convert option values to appropriate data type
+            records_df['Option Value'] = records_df['Option Value'].astype(float)
+
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            st.info(f"Calculation completed in {elapsed_time:.2f} seconds.")
+
+    # Display the DataFrame with the option values
+    st.dataframe(records_df.style.set_properties(**{'font-weight': 'bold'}))
+
+
+
 def model_custom_predict(spot_price, strike_price, maturity, risk_free_interest, volatility):
-    inputs_to_model = pd.DataFrame({'Spot Price': [spot_price / strike_price],
-                                    'Strike Price': [strike_price],
-                                    'Maturity': [maturity],
-                                    'risk_free_interest': [risk_free_interest],
-                                    'Volatility': [volatility]
-                                    })
+    inputs_to_model = pd.DataFrame({'Spot Price': spot_price / strike_price,
+                                    'Strike Price': strike_price,
+                                    'Maturity': maturity,
+                                    'risk_free_interest': risk_free_interest,
+                                    'Volatility': volatility}, index=[0])  # Specify index as [0]
     input_data_scaled = scaler.transform(inputs_to_model.values)  # Use the 'scaler' variable
     value = loaded_model.predict(input_data_scaled)  # Use the 'loaded_model' variable
     option_value = value * strike_price
     return option_value
+
 
 if __name__ == "__main__":
     main()
