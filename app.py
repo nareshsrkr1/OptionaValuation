@@ -4,7 +4,6 @@ import joblib
 import logging
 import yaml
 import torch
-import numpy as np
 from ComputeBS_MC import monte_carlo_call
 
 import streamlit as st
@@ -30,12 +29,18 @@ except Exception as e:
 def main():
     st.title("Option Pricing App")
 
+    if 'option_value' not in st.session_state:
+        st.session_state.option_value = None
+    if 'show_table' not in st.session_state:
+        st.session_state.show_table=False
+
+
     # Input fields
-    spot_price = st.number_input("Spot Price", value=50.0)
-    strike_price = st.number_input("Strike Price", value=45.0)
-    maturity = st.number_input("Maturity (in days)", value=90)
-    risk_free_interest = st.number_input("Risk-Free Interest Rate", value=0.01, step=0.01, disabled=True)
-    volatility = st.slider("Volatility", min_value=0.1, max_value=1.0, value=0.4, step=0.1)
+    spot_price = st.number_input("Spot Price", value=50.0, key="spot_price")
+    strike_price = st.number_input("Strike Price", value=45.0, key="strike_price")
+    maturity = st.number_input("Maturity (in days)", value=90, key="maturity")
+    risk_free_interest = st.number_input("Risk-Free Interest Rate", value=0.01, step=0.01, disabled=True, key="risk_free_interest")
+    volatility = st.slider("Volatility", min_value=0.1, max_value=1.0, value=0.4, step=0.1, key="volatility")
 
     # Convert input values to floats
     spot_price = float(spot_price)
@@ -44,46 +49,61 @@ def main():
     risk_free_interest = float(risk_free_interest)
     volatility = float(volatility)
 
+    hide_table_row_index = """
+                        <style>
+                        thead tr th:first-child {display:none}
+                        tbody th {display:none}
+                        </style>
+                        """
+    st.markdown(hide_table_row_index, unsafe_allow_html=True)
+
+
     # Predict option value using the model
     if st.button("Predict with Model"):
         try:
-            model_option_value = model_custom_predict(spot_price, strike_price, maturity / 365, risk_free_interest,
-                                                      volatility)
-            model_option_val = str(round(model_option_value[0][0],2))
-            # logging.info("model_option_value " + str(model_option_value[0]))
-            logging.info("model_option_value " + model_option_val)
+            model_option_value = model_custom_predict(spot_price, strike_price, maturity / 365, risk_free_interest, volatility)
+            model_option_val = round(model_option_value.item(), 2)
+            logging.info("model_option_value " + str(model_option_val))
 
-            st.success("The predicted option value with the model is: " + model_option_val)
+            st.session_state.option_value = model_option_val
+            st.success("The predicted option value with the model is: {:.2f}".format(model_option_val))
+            st.session_state.show_table = True
 
-            # Create a table to display inputs and predicted values
-            inputs = pd.DataFrame({'Spot Price': [spot_price],
-                                   'Strike Price': [strike_price],
-                                   'Maturity': [maturity],
-                                   'Risk-Free Interest Rate': [risk_free_interest],
-                                   'Volatility': [volatility],
-                                   'Predicted Option Value': model_option_val})
-
-            inputs = inputs.applymap(lambda x: round(x, 2))  # Round the values in the DataFrame
-
-            st.table(inputs)
-
-            # Compare with Monte Carlo simulation
-            if st.button("Compare with Monte Carlo"):
-                try:
-                    mc_option_value = monte_carlo_call(torch.tensor(spot_price), torch.tensor(strike_price),
-                                                       torch.tensor(maturity / 365), torch.tensor(risk_free_interest),
-                                                       torch.tensor(volatility))
-                    # mc_option_value = mc_option_value
-                    inputs.loc[1] = ['Monte Carlo Simulation', '', '', '', '', mc_option_value]
-                    # inputs = inputs.applymap(lambda x: round(x, 2))  # Round the values in the DataFrame
-                    st.table(inputs)
-                    diff = abs(model_option_value[0] - mc_option_value[0])
-                    st.info("Difference between model prediction and Monte Carlo simulation: {:.2f}".format(diff))
-                except Exception as e:
-                    st.error("An error occurred during Monte Carlo simulation: " + str(e))
 
         except Exception as e:
             st.error("An error occurred during model prediction: " + str(e))
+
+    # Display the table if the flag is True
+    if st.session_state.show_table:
+        input_values = pd.DataFrame({'Spot Price': [spot_price],
+                                     'Strike Price': [strike_price],
+                                     'Maturity': [maturity],
+                                     'Risk-Free Interest Rate': [risk_free_interest],
+                                     'Volatility': [volatility],
+                                     'Predicted Option Value': [st.session_state.option_value]})
+
+        st.table(input_values.style.format('{:.2f}'))
+
+
+
+    # Compare with Monte Carlo simulation
+    if st.session_state.option_value is not None:
+        if st.button("Compare with Monte Carlo Simulation"):
+            try:
+                mc_option_value = monte_carlo_call(torch.tensor(spot_price), torch.tensor(strike_price),torch.tensor(risk_free_interest),
+                                                   torch.tensor(maturity / 365),
+                                                   torch.tensor(volatility))
+                mc_option_val = round(mc_option_value.item(), 2) if mc_option_value is not None else None
+
+                diff_percentage = abs(st.session_state.option_value - mc_option_val) / st.session_state.option_value * 100
+
+                comparison_table = pd.DataFrame({'Model Prediction': [st.session_state.option_value],
+                                                 'Monte Carlo Simulation': [mc_option_val],})
+                                                 # 'Difference (%)': [diff_percentage]})
+                st.table(comparison_table.reset_index(drop=True).style.format('{:.2f}'))
+
+            except Exception as e:
+                st.error("An error occurred during Monte Carlo simulation: " + str(e))
 
 # Prediction function
 def model_custom_predict(spot_price, strike_price, maturity, risk_free_interest, volatility):
