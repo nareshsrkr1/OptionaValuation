@@ -16,7 +16,7 @@ def black_scholes_call(S, K, r, T, sigma):
     return call_price
 
 
-def monte_carlo_call(S, K, r, T, sigma, n_simulations):
+def monte_carlo_call(S, K, r, T, sigma, n_simulations=100000):
     # Generate random numbers
     rand_numbers = torch.randn(n_simulations)
 
