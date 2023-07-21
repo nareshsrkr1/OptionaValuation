@@ -1,29 +1,33 @@
--- Assuming you have two tables 'x' and 'y' with the same column structure
+DECLARE @BatchSize INT = 1000; -- Set your desired batch size
 
-DECLARE
-   batch_size NUMBER := 1000; -- Set the desired batch size
-   total_rows NUMBER;
-   batch_number NUMBER := 1;
+DECLARE @SDFKey NVARCHAR(MAX);
+
+DECLARE db_cursor CURSOR FOR
+SELECT DISTINCT Source_Data_File_Reference_Key
+FROM DANDT..RLEN_PLUS_FINAL WITH (NOLOCK)
+ORDER BY Source_Data_File_Reference_Key DESC;
+
+OPEN db_cursor;
+
+FETCH NEXT FROM db_cursor INTO @SDFKey;
+
+WHILE @@FETCH_STATUS = 0
 BEGIN
-   -- Get the total number of rows in table 'x'
-   SELECT COUNT(*) INTO total_rows FROM x;
-   
-   WHILE batch_size * (batch_number - 1) < total_rows LOOP
-      -- Insert data into table 'y' in batches with all columns
-      INSERT INTO y
-      SELECT *
-      FROM x
-      WHERE rownum <= batch_size
-      OFFSET batch_size * (batch_number - 1);
-      
-      -- Commit after each batch to free resources and persist data
-      COMMIT;
+    PRINT CONCAT('Begin:', @SDFKey);
 
-      -- Increment the batch number
-      batch_number := batch_number + 1;
-   END LOOP;
-   
-   -- Final commit outside the loop
-   COMMIT;
-END;
-/
+    BEGIN TRAN;
+
+    INSERT INTO DNT_HIST..RLEN_PLUS_FINAL WITH (TABLOCK) -- Use TABLOCK hint
+    SELECT TOP (@BatchSize) *
+    FROM DANDT..RLEN_PLUS_FINAL WITH (NOLOCK)
+    WHERE Source_Data_File_Reference_Key = @SDFKey;
+
+    COMMIT;
+
+    PRINT CONCAT('FINISH:', @SDFKey);
+
+    FETCH NEXT FROM db_cursor INTO @SDFKey;
+END
+
+CLOSE db_cursor;
+DEALLOCATE db_cursor;
